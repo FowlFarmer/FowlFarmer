@@ -2,7 +2,7 @@ name: README build
 on:
   push:
     branches:
-      - main
+      - devel
   schedule:
     - cron: "0 4 * * *"
   workflow_dispatch:  # 👈 enables manual trigger
