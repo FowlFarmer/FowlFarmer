@@ -246,23 +246,30 @@ def svg_overwrite(filename, age_data, commit_data, star_data, repo_data, contrib
     """
     tree = etree.parse(filename)
     root = tree.getroot()
-    justify_format(root, 'commit_data', commit_data, 22)
-    justify_format(root, 'star_data', star_data, 14)
-    justify_format(root, 'repo_data', repo_data, 6)
-    justify_format(root, 'contrib_data', contrib_data)
-    justify_format(root, 'follower_data', follower_data, 10)
-    justify_format(root, 'loc_data', loc_data[2], 9)
-    justify_format(root, 'loc_add', loc_data[0])
-    justify_format(root, 'loc_del', loc_data[1], 7)
+    justify_format(root, 'commit_data', commit_data, 24)
+    justify_format(root, 'star_data', star_data, 12)
+    # justify_format(root, 'repo_data', repo_data, 6)
+    justify_format(root, 'contrib_data', contrib_data, 5) # Only show total contributed repos
+    justify_format(root, 'follower_data', follower_data, 8)
+
+    # New: handle the whole LOC display as one block
+    loc_add, loc_del, loc_total = loc_data   # (additions, deletions, total)
+    flat_text = build_loc_flat_text(loc_total, loc_add, loc_del)  # e.g. "446,276 ( 523,178++, 76,902-- )"
+    update_loc_block(root, loc_total, loc_add, loc_del)           # injects colored tspans
+    justify_dots(root, 'loc_block_dots', flat_text, target_len=42)
+
+
+    justify_format(root, 'age_data', age_data, 49)  # added since your SVG has age_data
     tree.write(filename, encoding='utf-8', xml_declaration=True)
 
 
 def justify_format(root, element_id, new_text, length=0):
     """
-    Updates and formats the text of the element, and modifes the amount of dots in the previous element to justify the new text on the svg
+    Updates and formats the text of the element, and modifies the amount of dots
+    in the previous element to justify the new text on the svg
     """
     if isinstance(new_text, int):
-        new_text = f"{'{:,}'.format(new_text)}"
+        new_text = f"{new_text:,}"
     new_text = str(new_text)
     find_and_replace(root, element_id, new_text)
     just_len = max(0, length - len(new_text))
@@ -276,14 +283,84 @@ def justify_format(root, element_id, new_text, length=0):
 
 def find_and_replace(root, element_id, new_text):
     """
-    Finds the element in the SVG file and replaces its text with a new value
+    Finds the element in the SVG file and replaces its text with a new value.
+    Prints warnings if element is not found.
     """
     element = root.find(f".//*[@id='{element_id}']")
-    if element is not None:
+    if element is None:
+        print(f"[WARN] Element with id='{element_id}' not found.")
+    else:
         element.text = new_text
+        print(f"[OK] Updated id='{element_id}' with text='{new_text}'")
+
+# ===== LOC block helpers (new) =====
+
+def build_loc_flat_text(total, add, delete):
+    """Return the flat string used to compute width and as the unstyled fallback."""
+    return f"{fmt(total)} ( {fmt(add)}++, {fmt(delete)}-- )"
+
+def fmt(n):
+    return f"{int(n):,}" if isinstance(n, (int, float)) else str(n)
+
+def update_loc_block(root, total, add, delete):
+    """
+    Rebuilds <tspan id="loc_block"> to contain colored child tspans for add/del,
+    while treating the entire text as one logical block for width calculations.
+    """
+    el = root.find(".//*[@id='loc_block']")
+    if el is None:
+        print("[WARN] Element with id='loc_block' not found.")
+        return
+
+    # Determine the SVG namespace for creating <tspan> elements correctly
+    ns = el.tag.split('}')[0].lstrip('{') if '}' in el.tag else "http://www.w3.org/2000/svg"
+    tspan_tag = f"{{{ns}}}tspan"
+
+    # Remove existing children but keep attributes
+    for child in list(el):
+        el.remove(child)
+
+    # Build: "<total> ( " + <addColor>add</addColor> + "++, " + <delColor>del</delColor> + "-- )"
+    total_s = fmt(total)
+    add_s   = fmt(add)
+    del_s   = fmt(delete)
+
+    el.text = f"{total_s} ( "
+
+    t_add = etree.SubElement(el, tspan_tag, {"class": "addColor"})
+    t_add.text = add_s
+    t_add.tail = "++, "
+
+    t_del = etree.SubElement(el, tspan_tag, {"class": "delColor"})
+    t_del.text = del_s
+    t_del.tail = "-- )"
+
+    print(f"[OK] Rebuilt 'loc_block' as: {build_loc_flat_text(total, add, delete)}")
 
 
+def justify_dots(root, dots_id, full_text, target_len=30):
+    """
+    Justify a *_dots element against the provided full_text length.
+    Ensures spaces don't collapse by setting xml:space='preserve'.
+    """
+    dots_el = root.find(f".//*[@id='{dots_id}']")
+    if dots_el is None:
+        print(f"[WARN] Dots element with id='{dots_id}' not found.")
+        return
 
+    just_len = target_len - len(full_text)
+    if just_len <= 0:
+        dot_string = ' '
+    elif just_len == 1:
+        dot_string = ' '
+    elif just_len == 2:
+        dot_string = '. '
+    else:
+        dot_string = ' ' + ('.' * just_len) + ' '
+
+    dots_el.set("{http://www.w3.org/XML/1998/namespace}space", "preserve")
+    dots_el.text = dot_string
+    print(f"[OK] Updated '{dots_id}' for width {target_len} vs text len {len(full_text)}")
 
 
 def user_getter(username):
@@ -371,8 +448,8 @@ if __name__ == '__main__':
 
     for index in range(len(total_loc)-1): total_loc[index] = '{:,}'.format(total_loc[index]) # format added, deleted, and total LOC
 
-    svg_overwrite('dark.svg', age_data, commit_data, star_data, repo_data, contrib_data, follower_data, total_loc[:-1])
-    svg_overwrite('light.svg', age_data, commit_data, star_data, repo_data, contrib_data, follower_data, total_loc[:-1])
+    svg_overwrite('/Users/theodore/Desktop/Repositories/FowlFarmer/dark.svg', age_data, commit_data, star_data, repo_data, contrib_data, follower_data, total_loc[:-1])
+    svg_overwrite('/Users/theodore/Desktop/Repositories/FowlFarmer/dark.svg', age_data, commit_data, star_data, repo_data, contrib_data, follower_data, total_loc[:-1])
 
     # move cursor to override 'Calculation times:' with 'Total function time:' and the total function time, then move cursor back
     print('\033[F\033[F\033[F\033[F\033[F\033[F\033[F',
