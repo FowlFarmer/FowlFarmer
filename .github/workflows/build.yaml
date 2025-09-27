@@ -5,6 +5,7 @@ on:
       - main
   schedule:
     - cron: "0 4 * * *"
+  workflow_dispatch:  # 👈 enables manual trigger
 
 jobs:
   build:
@@ -16,8 +17,7 @@ jobs:
       - name: Set up Python
         uses: actions/setup-python@v6
         with:
-          # Keep 3.8 if your code requires it (note: 3.8 is EOL).
-          python-version: '3.8'
+          python-version: '3.12.6'
 
       - name: Configure pip cache
         uses: actions/cache@v4
